@@ -1,0 +1,9 @@
+node_modules
+artifacts
+.openzeppelin
+.env
+RandomNumber.sol
+cache
+scripts 
+test
+yarn.lock
