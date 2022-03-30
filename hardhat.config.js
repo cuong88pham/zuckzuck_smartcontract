@@ -20,25 +20,39 @@ module.exports = {
     settings: {
       optimizer: {
         enabled: true,
-        runs: 1000
+        runs: 2000,
+        
       }
     }
   },
   networks: {
     fantom_testnet: {
       url: `https://xapi.testnet.fantom.network/lachesis/`,
-      gasPrice: process.env.GAS_PRICE,
+      gasPrice: 420000000000,
       
-      accounts: [process.env.PRIVATE_KEY]
+      accounts: [`ed81990a339aa50c992a81bd778150f65ec68e0d557cd074e14b91d0a4d08a97`]
     },
+    fantom: {
+      url: `https://rpc.ftm.tools/`,
+      gasPrice: 300000000000,
+      
+      accounts: [`ed81990a339aa50c992a81bd778150f65ec68e0d557cd074e14b91d0a4d08a97`]
+    },
+    matic_testnet: {
+      url: `https://matic-mumbai.chainstacklabs.com/`,
+      gasPrice: 300000000000,
+      
+      accounts: [`ed81990a339aa50c992a81bd778150f65ec68e0d557cd074e14b91d0a4d08a97`]
+    },
+    
     bsc_testnet: {
       url: `https://data-seed-prebsc-1-s1.binance.org:8545/`,
-      gasPrice: process.env.GAS_PRICE,
+      gasPrice: 300000000000,
       
-      accounts: [process.env.PRIVATE_KEY]
+      accounts: [`ed81990a339aa50c992a81bd778150f65ec68e0d557cd074e14b91d0a4d08a97`]
     }
   },
   etherscan: {
-    apiKey: process.env.API_KEY
+    apiKey: "W7W73A5C4QWBN1U41ZIUZPVJTNEFJHI1MK"
   }
 };

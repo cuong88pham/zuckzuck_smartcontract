@@ -3,20 +3,87 @@ pragma solidity ^0.8.11;
 
 import "@openzeppelin/contracts-upgradeable/token/ERC721/ERC721Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721EnumerableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721URIStorageUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721BurnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import "@openzeppelin/contracts-upgradeable/utils/CountersUpgradeable.sol";
-import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
+import "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
+interface IERC20 {
+    /**
+     * @dev Returns the amount of tokens in existence.
+     */
+    function totalSupply() external view returns (uint256);
+
+    /**
+     * @dev Returns the amount of tokens owned by `account`.
+     */
+    function balanceOf(address account) external view returns (uint256);
+
+    /**
+     * @dev Moves `amount` tokens from the caller's account to `to`.
+     *
+     * Returns a boolean value indicating whether the operation succeeded.
+     *
+     * Emits a {Transfer} event.
+     */
+    function transfer(address to, uint256 amount) external returns (bool);
+
+    /**
+     * @dev Returns the remaining number of tokens that `spender` will be
+     * allowed to spend on behalf of `owner` through {transferFrom}. This is
+     * zero by default.
+     *
+     * This value changes when {approve} or {transferFrom} are called.
+     */
+    function allowance(address owner, address spender) external view returns (uint256);
+
+    /**
+     * @dev Sets `amount` as the allowance of `spender` over the caller's tokens.
+     *
+     * Returns a boolean value indicating whether the operation succeeded.
+     *
+     * IMPORTANT: Beware that changing an allowance with this method brings the risk
+     * that someone may use both the old and the new allowance by unfortunate
+     * transaction ordering. One possible solution to mitigate this race
+     * condition is to first reduce the spender's allowance to 0 and set the
+     * desired value afterwards:
+     * https://github.com/ethereum/EIPs/issues/20#issuecomment-263524729
+     *
+     * Emits an {Approval} event.
+     */
+    function approve(address spender, uint256 amount) external returns (bool);
+
+    /**
+     * @dev Moves `amount` tokens from `from` to `to` using the
+     * allowance mechanism. `amount` is then deducted from the caller's
+     * allowance.
+     *
+     * Returns a boolean value indicating whether the operation succeeded.
+     *
+     * Emits a {Transfer} event.
+     */
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount
+    ) external returns (bool);
+
+    /**
+     * @dev Emitted when `value` tokens are moved from one account (`from`) to
+     * another (`to`).
+     *
+     * Note that `value` may be zero.
+     */
+    event Transfer(address indexed from, address indexed to, uint256 value);
+
+    /**
+     * @dev Emitted when the allowance of a `spender` for an `owner` is set by
+     * a call to {approve}. `value` is the new allowance.
+     */
+    event Approval(address indexed owner, address indexed spender, uint256 value);
+}
 /// @custom:security-contact info@zuckzuck.land
-contract LandNFT is Initializable, ERC721Upgradeable, ERC721EnumerableUpgradeable, ERC721URIStorageUpgradeable, PausableUpgradeable, OwnableUpgradeable, ERC721BurnableUpgradeable {
-    using CountersUpgradeable for CountersUpgradeable.Counter;
+contract LandNFT is Initializable, ERC721Upgradeable, ERC721EnumerableUpgradeable, PausableUpgradeable, OwnableUpgradeable {
 
-    CountersUpgradeable.Counter private _tokenIdCounter;
-
-    enum LandType{GoldMining, GoldKingdom, Forging}
+    enum LandType{GoldMiningPit, GoldKingdomPit, ForgingPit}
     uint constant E6 = 10**6;
     uint constant LandLimited = 15000;    
     bool public onlyWhitelisted;
@@ -24,8 +91,8 @@ contract LandNFT is Initializable, ERC721Upgradeable, ERC721EnumerableUpgradeabl
     bool public allowPublicMintGMP;
     bool public allowPublicMintGKP;
     bool public allowPublicMintForging;
-    uint256 public landPrice;
-    ERC20Burnable private _token;
+    IERC20 private _token;
+    
     struct Land {
       uint256 tokenId;
       address owner;
@@ -37,33 +104,30 @@ contract LandNFT is Initializable, ERC721Upgradeable, ERC721EnumerableUpgradeabl
 
     Land[] public lands;
     address[] public whitelistedAddresses;
-
-    
-    mapping (uint256 => address) public gmpIndexToOwner;
-    mapping (address => mapping(LandType => uint256)) public ownershipGMPCount;
-    mapping (address => uint256) public WhiteListAddress;
+    mapping (address => mapping(LandType => uint256)) public ownershipLandCount;
     mapping (LandType => uint256) NFTLimitCount;
-    mapping (address => mapping(LandType => Land[])) public gmpsOwner;
-    event BoughtLand(uint256 gmp_id, LandType landType);
+    mapping (address => uint256[]) public ownerOfLands;
+    mapping (LandType => uint256) public LandPrice;
     enum LandState{Seed, Hatched}
+    event BuyLand(uint256 tokenId, LandType landType, uint256 totalAmount);
+    event OpenBundle(uint256 tokenId, LandType landType);
     address public bundleAddress;
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() initializer {}
 
-    function initialize(ERC20Burnable token, address _bundleAddress, bool _onlyWhitelisted) initializer public {
-        __ERC721_init("ZuckZuck's Land", "LAND");
+    function initialize(string memory _name, string memory _symbol, IERC20 token, address _bundleAddress, bool _onlyWhitelisted) initializer public {
+        __ERC721_init(_name, _symbol);
         __ERC721Enumerable_init();
-        __ERC721URIStorage_init();
-        __Pausable_init();
         __Ownable_init();
-        __ERC721Burnable_init();
-        NFTLimitCount[LandType.GoldMining] = LandLimited;
-        NFTLimitCount[LandType.GoldKingdom] = LandLimited;
-        NFTLimitCount[LandType.Forging] = LandLimited;
+        NFTLimitCount[LandType.GoldMiningPit] = LandLimited;
+        NFTLimitCount[LandType.GoldKingdomPit] = LandLimited;
+        NFTLimitCount[LandType.ForgingPit] = LandLimited;
         _token = token;
         onlyWhitelisted = _onlyWhitelisted;
         allowPublicMint = false;
-        landPrice = 500 * E6;
+        LandPrice[LandType.GoldMiningPit] = 500 * E6;
+        LandPrice[LandType.GoldKingdomPit] = 500 * E6;
+        LandPrice[LandType.ForgingPit] = 500 * E6;
         allowPublicMintGMP= true;
         allowPublicMintGKP=false;
         allowPublicMintForging=false;
@@ -92,64 +156,59 @@ contract LandNFT is Initializable, ERC721Upgradeable, ERC721EnumerableUpgradeabl
     function setAllowPublicMint(bool _state) external onlyOwner {
         allowPublicMint = _state;
     }
-    function setLandPrice(uint256 _price) external onlyOwner {
-        landPrice = _price;
+    function setLandPrice(LandType landType, uint256 _price) external onlyOwner {
+        LandPrice[landType] = _price;
     }
 
     function mint(uint256 quantity, LandType landType) external {
         require(allowPublicMint, "Can not mint at now");
-        if(landType == LandType.GoldMining){
+        if(landType == LandType.GoldMiningPit){
             require(allowPublicMintGMP, "Can not mint at now");
         }
-        if(landType == LandType.GoldKingdom){
+        if(landType == LandType.GoldKingdomPit){
             require(allowPublicMintGKP, "Can not mint at now");
         }
-        if(landType == LandType.Forging){
+        if(landType == LandType.ForgingPit){
             require(allowPublicMintForging, "Can not mint at now");
         }
 
         require(quantity > 0, "Not zero");
         require(NFTLimitCount[landType] + quantity <= LandLimited, "Land is limited");
         
-        require(_token.allowance(msg.sender, address(this)) >= quantity * landPrice, "Need increase allowance");
-        _token.transferFrom(msg.sender, address(this), quantity * landPrice);
+        require(_token.allowance(msg.sender, address(this)) >= quantity * LandPrice[landType], "Need increase allowance");
+        _token.transferFrom(msg.sender, address(this), quantity * LandPrice[landType]);
          for (uint256 index = 0; index < quantity; index++) {
-            uint256 tokenId = _tokenIdCounter.current();
-            _tokenIdCounter.increment();
-            _safeMint(msg.sender, tokenId);
-            _setTokenURI(tokenId, _baseURI());
+            uint mintIndex = totalSupply();
+            _safeMint(msg.sender, mintIndex);
             Land memory land = Land({
-                tokenId: tokenId,
+                tokenId: mintIndex,
                 owner: msg.sender,
                 isGenesis: false,
                 landType: landType,
                 minted_at: block.timestamp,
                 landState: LandState.Seed
             });
-            lands.push(land);
-            gmpsOwner[msg.sender][landType].push(land);
-            gmpIndexToOwner[tokenId] = msg.sender;
-            emit BoughtLand(tokenId, landType);
+            lands[mintIndex] = land;
+            ownerOfLands[msg.sender].push(mintIndex);
+            emit BuyLand(mintIndex, landType, LandPrice[landType]);
          }
-        ownershipGMPCount[msg.sender][landType] += quantity;
+        // ownershipGMPCount[msg.sender][landType] += quantity;
     }
 
-    function openBundles(address owner, LandType landType) external {
+    function openBundle(address owner, LandType landType) external {
         require(msg.sender == bundleAddress, "Not allow to open");
-        if(landType == LandType.GoldMining){
+        if(landType == LandType.GoldMiningPit){
             require(allowPublicMintGMP, "Can not mint at now");
         }
-        if(landType == LandType.GoldKingdom){
+        if(landType == LandType.GoldKingdomPit){
             require(allowPublicMintGKP, "Can not mint at now");
         }
-        if(landType == LandType.Forging){
+        if(landType == LandType.ForgingPit){
             require(allowPublicMintForging, "Can not mint at now");
         }
         
-        uint256 tokenId = _tokenIdCounter.current();
-        _tokenIdCounter.increment();
+        uint256 tokenId = totalSupply();
         _safeMint(owner, tokenId);
-        _setTokenURI(tokenId, _baseURI());
         Land memory land = Land({
             tokenId: tokenId,
             owner: owner,
@@ -158,13 +217,16 @@ contract LandNFT is Initializable, ERC721Upgradeable, ERC721EnumerableUpgradeabl
             minted_at: block.timestamp,
             landState: LandState.Seed
         });
-        lands.push(land);
-        gmpsOwner[owner][LandType.GoldMining].push(land);
-        gmpIndexToOwner[tokenId] = owner;
-        emit BoughtLand(tokenId, landType);    
+        lands[tokenId] = land;
+        ownerOfLands[msg.sender].push(tokenId);
+
+        // gmpsOwner[owner][LandType.GoldMining].push(land);
+        // gmpIndexToOwner[tokenId] = owner;
+        emit OpenBundle(tokenId, landType);
+ 
     }
 
-    function setToken(ERC20Burnable token) public onlyOwner{
+    function setToken(IERC20 token) public onlyOwner{
       _token = token;
     }
     function setbundleAddress(address token) public onlyOwner{
@@ -190,12 +252,16 @@ contract LandNFT is Initializable, ERC721Upgradeable, ERC721EnumerableUpgradeabl
         _unpause();
     }
 
-    function safeMint(address to, string memory uri) public onlyOwner {
-        uint256 tokenId = _tokenIdCounter.current();
-        _tokenIdCounter.increment();
-        _safeMint(to, tokenId);
-        _setTokenURI(tokenId, uri);
-    }
+    // function safeMint(address to, uint256 tokenId, string memory _name, string memory _image_url, bool _isGenesis, uint _landSpotSize, uint _moleQuantity, Rarity _rarity, TypeOfBox _typeOfBox) public onlyOwner {
+    //     _safeMint(to, tokenId);
+    //     lands[tokenId] = Land(tokenId, _image_url, _isGenesis, false, _landSpotSize, _moleQuantity, _rarity, _typeOfBox);
+    //     uint256 tokenId;
+    //   address owner;
+    //   bool isGenesis;
+    //   LandType landType;
+    //   uint256 minted_at;
+    //   LandState landState;
+    // }
 
     function _beforeTokenTransfer(address from, address to, uint256 tokenId)
         internal
@@ -209,7 +275,7 @@ contract LandNFT is Initializable, ERC721Upgradeable, ERC721EnumerableUpgradeabl
 
     function _burn(uint256 tokenId)
         internal
-        override(ERC721Upgradeable, ERC721URIStorageUpgradeable)
+        override(ERC721Upgradeable)
     {
         super._burn(tokenId);
     }
@@ -217,7 +283,7 @@ contract LandNFT is Initializable, ERC721Upgradeable, ERC721EnumerableUpgradeabl
     function tokenURI(uint256 tokenId)
         public
         view
-        override(ERC721Upgradeable, ERC721URIStorageUpgradeable)
+        override(ERC721Upgradeable)
         returns (string memory)
     {
         return super.tokenURI(tokenId);
