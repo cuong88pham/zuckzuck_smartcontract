@@ -7,3 +7,4 @@ cache
 scripts 
 test
 yarn.lock
+hardhat.config.js

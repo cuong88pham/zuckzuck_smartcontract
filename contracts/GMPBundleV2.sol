@@ -259,7 +259,7 @@ contract GMPBundleV2 is Initializable, ERC721Upgradeable, ERC721EnumerableUpgrad
         uint256 estAmount = NFTPrice[typeOfBox][rarity] * quantity;
         require(token.balanceOf(msg.sender) >= estAmount, "Not enough to purchase");
         require(NFTLimitCount[typeOfBox][rarity] >= quantity, "NFT is limited");
-        token.transferFrom(msg.sender, address(this), estAmount);
+        token.transferFrom(msg.sender, address(beneficiary), estAmount);
         for (uint256 index = 0; index < quantity; index++) {
             uint256 tokenId = _tokenIdCounter.current();
             _tokenIdCounter.increment();
@@ -359,8 +359,10 @@ contract GMPBundleV2 is Initializable, ERC721Upgradeable, ERC721EnumerableUpgrad
             _i /= 10;
         }
         return string(bstr);
+    
     }
-    function withdraw(bool erc_token) external onlyOwner {
+
+    function withdraw(bool erc_token) external onlyOwner whenNotPaused notContract {
         if(erc_token){
             uint256 total_amount = token.balanceOf(address(this));
             require(total_amount > 0, "empty");
