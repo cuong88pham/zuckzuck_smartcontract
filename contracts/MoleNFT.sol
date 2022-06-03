@@ -3,58 +3,149 @@ pragma solidity ^0.8.11;
 
 import "@openzeppelin/contracts-upgradeable/token/ERC721/ERC721Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721EnumerableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721URIStorageUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721BurnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import "@openzeppelin/contracts-upgradeable/utils/CountersUpgradeable.sol";
-import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
+import "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
+import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+
+interface IERC20 {
+    /**
+     * @dev Returns the amount of tokens in existence.
+     */
+    function totalSupply() external view returns (uint256);
+
+    /**
+     * @dev Returns the amount of tokens owned by `account`.
+     */
+    function balanceOf(address account) external view returns (uint256);
+
+    /**
+     * @dev Moves `amount` tokens from the caller's account to `to`.
+     *
+     * Returns a boolean value indicating whether the operation succeeded.
+     *
+     * Emits a {Transfer} event.
+     */
+    function transfer(address to, uint256 amount) external returns (bool);
+
+    /**
+     * @dev Returns the remaining number of tokens that `spender` will be
+     * allowed to spend on behalf of `owner` through {transferFrom}. This is
+     * zero by default.
+     *
+     * This value changes when {approve} or {transferFrom} are called.
+     */
+    function allowance(address owner, address spender) external view returns (uint256);
+
+    /**
+     * @dev Sets `amount` as the allowance of `spender` over the caller's tokens.
+     *
+     * Returns a boolean value indicating whether the operation succeeded.
+     *
+     * IMPORTANT: Beware that changing an allowance with this method brings the risk
+     * that someone may use both the old and the new allowance by unfortunate
+     * transaction ordering. One possible solution to mitigate this race
+     * condition is to first reduce the spender's allowance to 0 and set the
+     * desired value afterwards:
+     * https://github.com/ethereum/EIPs/issues/20#issuecomment-263524729
+     *
+     * Emits an {Approval} event.
+     */
+    function approve(address spender, uint256 amount) external returns (bool);
+
+    /**
+     * @dev Moves `amount` tokens from `from` to `to` using the
+     * allowance mechanism. `amount` is then deducted from the caller's
+     * allowance.
+     *
+     * Returns a boolean value indicating whether the operation succeeded.
+     *
+     * Emits a {Transfer} event.
+     */
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount
+    ) external returns (bool);
+
+    /**
+     * @dev Emitted when `value` tokens are moved from one account (`from`) to
+     * another (`to`).
+     *
+     * Note that `value` may be zero.
+     */
+    event Transfer(address indexed from, address indexed to, uint256 value);
+
+    /**
+     * @dev Emitted when the allowance of a `spender` for an `owner` is set by
+     * a call to {approve}. `value` is the new allowance.
+     */
+    event Approval(address indexed owner, address indexed spender, uint256 value);
+}
 /// @custom:security-contact info@zuckzuck.land
-contract MoleNFT is Initializable, ERC721Upgradeable, ERC721EnumerableUpgradeable, ERC721URIStorageUpgradeable, PausableUpgradeable, OwnableUpgradeable, ERC721BurnableUpgradeable {
-    using CountersUpgradeable for CountersUpgradeable.Counter;
+contract MoleNFT is Initializable, ERC721Upgradeable, ERC721EnumerableUpgradeable, PausableUpgradeable, OwnableUpgradeable {
 
-    CountersUpgradeable.Counter private _tokenIdCounter;
-
-    enum MoleState{Seed, Hatched}
-    uint constant E6 = 10**6;
+    uint constant E6 = 10**6;  
     bool public onlyWhitelisted;
     bool public allowPublicMint;
-    uint256 public molePrice;
-    ERC20Burnable private _token;
+    bool public allowPublicMintGMP;
+    bool public allowPublicMintGKP;
+    bool public allowPublicMintForging;
+    
+    bytes32 internal keyHash;
+    uint256 internal fee;
+    IERC20 private _token;
+    enum State{Seed, Hatched}
+    enum LandType{GoldMiningPit, GoldKingdomPit, ForgingPit}
+    enum Rarity{Special, Uncommon, Rare, Epic, Legendary, Mythic, Unique}
+    address private operatorAddress;
+    mapping(uint256 => string) private _tokenURIs;
+
+    
+    address[] public whitelistedAddresses;
+    
+
+
+    event OpenBundle(uint256 tokenId);
     address public bundleAddress;
+    AggregatorV3Interface internal priceFeed;
+    
     struct Mole {
       uint256 tokenId;
       address owner;
+      bool isGenesis;
       uint256 minted_at;
-      MoleState moleState;
+      Rarity rarity;
+      State state;
+      uint256 randomNumber;
     }
-
-    Mole[] public moles;
-    address[] public whitelistedAddresses;
-
+    mapping(uint256 => Mole) public moles;
     
-    mapping (uint256 => address) public moleIndexToOwner;
-    mapping (address => uint256) public WhiteListAddress;
-    mapping (address => Mole[]) public molesOwner;
-    mapping (address => uint256) public ownershipMoleCount;
-    event BoughtMole(uint256 mole_id);
-  
+    string public baseURL;
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() initializer {}
-
-    function initialize(ERC20Burnable token, address _bundleAddress, bool _onlyWhitelisted) initializer public {
-        __ERC721_init("ZuckZuck Mole", "MOLE");
+    
+    modifier onlyOperatorOrOwner() {
+        require(msg.sender == operatorAddress || msg.sender == this.owner(), "Not allow to do");
+        _;
+    }
+    
+    function setOperator(address _user) external onlyOwner{
+        operatorAddress = _user;
+    }
+    
+    function initialize(string memory _name, string memory _symbol, IERC20 token, bool _onlyWhitelisted) initializer public {
+        __ERC721_init(_name, _symbol);
         __ERC721Enumerable_init();
-        __ERC721URIStorage_init();
-        __Pausable_init();
         __Ownable_init();
-        __ERC721Burnable_init();
         _token = token;
         onlyWhitelisted = _onlyWhitelisted;
         allowPublicMint = false;
-        molePrice = 100 * E6;
-        bundleAddress = _bundleAddress;
+        allowPublicMintGMP= true;
+        allowPublicMintGKP=false;
+        allowPublicMintForging=false;
+        priceFeed = AggregatorV3Interface(0xAB594600376Ec9fD91F8e885dADF0CE036862dE0);
     }
 
     modifier notContract() {
@@ -79,57 +170,47 @@ contract MoleNFT is Initializable, ERC721Upgradeable, ERC721EnumerableUpgradeabl
     function setAllowPublicMint(bool _state) external onlyOwner {
         allowPublicMint = _state;
     }
-    function setMolePrice(uint256 _price) external onlyOwner {
-        molePrice = _price;
+    
+    function openBundle(address owner) external {
+        require(msg.sender == bundleAddress, "Cannot open");
+        uint256 tokenId = totalSupply();
+        _safeMint(owner, tokenId);
+        _setTokenURI(tokenId, uint2str(tokenId));
+
+        emit OpenBundle(tokenId);
     }
 
-    function mint(uint256 quantity) external {
-        require(allowPublicMint, "Can not mint at now");
-        require(quantity > 0, "Not zero");
-        
-        require(_token.allowance(msg.sender, address(this)) >= quantity * molePrice, "Need increase allowance");
-        _token.transferFrom(msg.sender, address(this), quantity * molePrice);
-         for (uint256 index = 0; index < quantity; index++) {
-            uint256 tokenId = _tokenIdCounter.current();
-            _tokenIdCounter.increment();
-            _safeMint(msg.sender, tokenId);
-            _setTokenURI(tokenId, _baseURI());
-            Mole memory mole = Mole({
-                tokenId: tokenId,
-                owner: msg.sender,
-                minted_at: block.timestamp,
-                moleState: MoleState.Seed
-            });
-            moles.push(mole);
-            molesOwner[msg.sender].push(mole);
-            moleIndexToOwner[tokenId] = msg.sender;
-            emit BoughtMole(tokenId);
-         }
-        ownershipMoleCount[msg.sender] += quantity;
+    function uint2str(uint _i) internal pure returns (string memory _uintAsString) {
+        if (_i == 0) {
+            return "0";
+        }
+        uint j = _i;
+        uint len;
+        while (j != 0) {
+            len++;
+            j /= 10;
+        }
+        bytes memory bstr = new bytes(len);
+        uint k = len;
+        while (_i != 0) {
+            k = k-1;
+            uint8 temp = (48 + uint8(_i - _i / 10 * 10));
+            bytes1 b1 = bytes1(temp);
+            bstr[k] = b1;
+            _i /= 10;
+        }
+        return string(bstr);
+    
+    }
+    function setDataPriceFeed(address maticUSD) external onlyOwner{
+        priceFeed = AggregatorV3Interface(maticUSD);
     }
 
-    function openBundles(address owner) external {       
-      require(msg.sender == bundleAddress, "Not allow to open");
-
-      uint256 tokenId = _tokenIdCounter.current();
-      _tokenIdCounter.increment();
-      _safeMint(owner, tokenId);
-      _setTokenURI(tokenId, _baseURI());
-      Mole memory mole = Mole({
-          tokenId: tokenId,
-          owner: owner,
-          minted_at: block.timestamp,
-          moleState: MoleState.Seed
-      });
-      moles.push(mole);
-      molesOwner[owner].push(mole);
-      moleIndexToOwner[tokenId] = owner;
-      ownershipMoleCount[owner] += 1;
-      emit BoughtMole(tokenId);    
-    }
-
-    function setToken(ERC20Burnable token) public onlyOwner{
+    function setToken(IERC20 token) public onlyOwner{
       _token = token;
+    }
+    function setbundleAddress(address token) public onlyOwner{
+      bundleAddress = token;
     }
     
     function _isContract(address addr) internal view returns (bool) {
@@ -139,8 +220,11 @@ contract MoleNFT is Initializable, ERC721Upgradeable, ERC721EnumerableUpgradeabl
         }
         return size > 0;
     }
-    function _baseURI() internal pure override returns (string memory) {
-        return "https://api.zuckzuck.land/mole/metadata/";
+    function setBaseURL(string memory _baseURL) external onlyOwner {
+        baseURL = _baseURL;
+    }
+    function _baseURI() internal view override returns (string memory) {
+        return baseURL;
     }
     
     function pause() public onlyOwner {
@@ -149,13 +233,6 @@ contract MoleNFT is Initializable, ERC721Upgradeable, ERC721EnumerableUpgradeabl
 
     function unpause() public onlyOwner {
         _unpause();
-    }
-
-    function safeMint(address to, string memory uri) public onlyOwner {
-        uint256 tokenId = _tokenIdCounter.current();
-        _tokenIdCounter.increment();
-        _safeMint(to, tokenId);
-        _setTokenURI(tokenId, uri);
     }
 
     function _beforeTokenTransfer(address from, address to, uint256 tokenId)
@@ -170,17 +247,34 @@ contract MoleNFT is Initializable, ERC721Upgradeable, ERC721EnumerableUpgradeabl
 
     function _burn(uint256 tokenId)
         internal
-        override(ERC721Upgradeable, ERC721URIStorageUpgradeable)
+        override(ERC721Upgradeable)
     {
         super._burn(tokenId);
     }
-
+    function _setTokenURI(uint256 tokenId, string memory _tokenURI) internal virtual {
+        require(_exists(tokenId), "ERC721URIStorage: URI set of nonexistent token");
+        _tokenURIs[tokenId] = _tokenURI;
+    }
     function tokenURI(uint256 tokenId)
         public
         view
-        override(ERC721Upgradeable, ERC721URIStorageUpgradeable)
+        override(ERC721Upgradeable)
         returns (string memory)
     {
+        require(_exists(tokenId), "ERC721URIStorage: URI query for nonexistent token");
+
+        string memory _tokenURI = _tokenURIs[tokenId];
+        string memory base = _baseURI();
+
+        // If there is no base URI, return the token URI.
+        if (bytes(base).length == 0) {
+            return _tokenURI;
+        }
+        // If both are set, concatenate the baseURI and tokenURI (via abi.encodePacked).
+        if (bytes(_tokenURI).length > 0) {
+            return string(abi.encodePacked(base, _tokenURI));
+        }
+
         return super.tokenURI(tokenId);
     }
 
