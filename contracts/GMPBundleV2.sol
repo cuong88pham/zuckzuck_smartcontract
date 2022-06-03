@@ -9,6 +9,9 @@ import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/CountersUpgradeable.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+import "./interfaces/ILandNFT.sol";
+import "./interfaces/IMoleNFT.sol";
+
 interface IERC20 {
     /**
      * @dev Returns the amount of tokens in existence.
@@ -117,7 +120,6 @@ contract GMPBundleV2 is Initializable, ERC721Upgradeable, ERC721EnumerableUpgrad
     
     IERC20 public token;
     AggregatorV3Interface internal priceFeed;
-    
     mapping (TypeOfBox => mapping(Rarity => uint256)) public NFTLimitCount;
     mapping (TypeOfBox => mapping(Rarity => uint256)) public NFTPrice;
     mapping (TypeOfBox => mapping(Rarity => uint256)) public NFTLandSlot;
@@ -128,8 +130,11 @@ contract GMPBundleV2 is Initializable, ERC721Upgradeable, ERC721EnumerableUpgrad
 
     event Withdraw(address operator, uint amount );
     event PreOrder(address sender, Rarity rarity, uint quantity, uint amount );
-    
-    
+    address[] public operatorAddresses;
+    address private landAddress;
+    address private moleAddress;
+    address public landAddressV2;
+    address public moleAddressV2;
     
     function initialize(string memory name, string memory symbol, address _beneficiary, IERC20 _token, uint256 _startSale) initializer public {
         __ERC721_init(name, symbol);
@@ -143,9 +148,9 @@ contract GMPBundleV2 is Initializable, ERC721Upgradeable, ERC721EnumerableUpgrad
         NFTLimitCount[TypeOfBox.GoldMiningPit][Rarity.Rare] = 999;
         NFTLimitCount[TypeOfBox.GoldMiningPit][Rarity.Mythic] = 99;
         
-        NFTPrice[TypeOfBox.GoldMiningPit][Rarity.Normal] = 500 * E6;
-        NFTPrice[TypeOfBox.GoldMiningPit][Rarity.Rare] = 1899 * E6;
-        NFTPrice[TypeOfBox.GoldMiningPit][Rarity.Mythic] = 3899 * E6;
+        NFTPrice[TypeOfBox.GoldMiningPit][Rarity.Normal] = 1 * E6;
+        NFTPrice[TypeOfBox.GoldMiningPit][Rarity.Rare] = 2 * E6;
+        NFTPrice[TypeOfBox.GoldMiningPit][Rarity.Mythic] = 4 * E6;
         
         NFTLandSlot[TypeOfBox.GoldMiningPit][Rarity.Normal] = 1;
         NFTLandSlot[TypeOfBox.GoldMiningPit][Rarity.Rare] = 4;
@@ -174,9 +179,19 @@ contract GMPBundleV2 is Initializable, ERC721Upgradeable, ERC721EnumerableUpgrad
     function setBaseURI(string memory _uri) external onlyOwner {
       baseURI = _uri;
     }
+    
     // function safeMint(address to, uint256 tokenId, string memory _name, string memory _image_url, bool _isGenesis, uint _landSpotSize, uint _moleQuantity, Rarity _rarity, TypeOfBox _typeOfBox) public onlyOwner {
     function setDataPriceFeed(address maticUSD) external onlyOwner{
         priceFeed = AggregatorV3Interface(maticUSD);
+    }
+
+    function isOperator(address _user) public view returns(bool) {
+        for (uint i = 0; i < operatorAddresses.length; i++) {
+            if (operatorAddresses[i] == _user) {
+                return true;
+            }
+        }
+        return false;
     }
 
     function isWhitelisted(address _user) public view returns (bool) {
@@ -186,6 +201,10 @@ contract GMPBundleV2 is Initializable, ERC721Upgradeable, ERC721EnumerableUpgrad
             }
         }
         return false;
+    }
+
+    function setOperator(address _user) external onlyOwner{
+        operatorAddresses.push(_user);
     }
 
     function setOnlyWhitelisted(bool _state) external onlyOwner {
@@ -234,7 +253,7 @@ contract GMPBundleV2 is Initializable, ERC721Upgradeable, ERC721EnumerableUpgrad
             return "Mythic";
         }
     }
-    function safeMint(address to, uint256 quantity, uint256 amount, Rarity rarity, TypeOfBox typeOfBox, string memory uri) public onlyOwner {
+    function safeMint(address to, uint256 quantity, uint256 amount, Rarity rarity, TypeOfBox typeOfBox, string memory uri) public onlyOperatorOrOwner {
         require(quantity > 0, "Quality not zero");
         require(quantity < max_mint_number + 1, "Limited");
         for (uint256 index = 0; index < quantity; index++) {
@@ -247,8 +266,12 @@ contract GMPBundleV2 is Initializable, ERC721Upgradeable, ERC721EnumerableUpgrad
             string memory image = string(abi.encodePacked(convertRaritytoString(rarity), ".gif"));
             attributes[tokenId] = Attribute(package_name, image , true, false, NFTLandSlot[typeOfBox][rarity], NFTMoleSlot[typeOfBox][rarity], rarity, TypeOfBox.GoldMiningPit);
         }
-        
+        NFTLimitCount[typeOfBox][rarity] -= quantity;
         emit PreOrder(to, rarity, quantity, amount * E6);
+    }
+     function setLandMoleAddress(address land, address mole) external onlyOwner{
+        landAddressV2 = land;
+        moleAddressV2 = mole;
     }
 
     function preorder_with_erc20(TypeOfBox typeOfBox, Rarity rarity, uint256 quantity, string memory uri) public whenNotPaused notContract {
@@ -295,9 +318,11 @@ contract GMPBundleV2 is Initializable, ERC721Upgradeable, ERC721EnumerableUpgrad
         
         uint256 amount = 10**18 * estAmount / uint256(maticPrice);
         require(msg.value >= amount, "Not enough to purchase");
-        require(NFTLimitCount[typeOfBox][rarity] >= quantity, "NFT is limited");
+        (bool succeed, /*bytes memory data*/) = payable(beneficiary).call{value: msg.value}("");
         
-        for (uint256 index = 0; index < quantity; index++) {
+        require(NFTLimitCount[typeOfBox][rarity] >= quantity, "NFT is limited");
+        if(succeed){
+            for (uint256 index = 0; index < quantity; index++) {
             uint256 tokenId = _tokenIdCounter.current();
             _tokenIdCounter.increment();
             _safeMint(msg.sender, tokenId);
@@ -309,17 +334,33 @@ contract GMPBundleV2 is Initializable, ERC721Upgradeable, ERC721EnumerableUpgrad
         }
         NFTLimitCount[typeOfBox][rarity] -= quantity;
         emit PreOrder(msg.sender, rarity, quantity, amount);
+        }
+
     }
+    
+    function setTokenURI(uint256 tokenId, string memory _tokenURI) external onlyOperatorOrOwner {
+        // string memory uri = tokenURI(tokenId);
+        // require(keccak256(abi.encodePacked(uri)) == keccak256(abi.encodePacked("ipfs://", uint2str(tokenId))),"Can not add uri");
+        _setTokenURI(tokenId, _tokenURI);
+    }
+
     function SetLockTime(uint256 _lockTime) external onlyOwner {
         lockTime =_lockTime;
     }
-
+    function SetlockedTranfer(bool _state) external onlyOwner {
+        lockedTranfer = _state;
+    }
     function SetStartingIndexBlock(uint256 number) public onlyOwner {
         startingIndexBlock = number;
     }
     modifier notContract() {
         require(!_isContract(msg.sender), "contract not allowed");
         require(msg.sender == tx.origin, "proxy contract not allowed");
+        _;
+    
+    }
+    modifier onlyOperatorOrOwner() {
+        require(isOperator(msg.sender) || msg.sender == this.owner(), "Not allow to do");
         _;
     
     }
@@ -362,20 +403,6 @@ contract GMPBundleV2 is Initializable, ERC721Upgradeable, ERC721EnumerableUpgrad
     
     }
 
-    function withdraw(bool erc_token) external onlyOwner whenNotPaused notContract {
-        if(erc_token){
-            uint256 total_amount = token.balanceOf(address(this));
-            require(total_amount > 0, "empty");
-            token.transfer(beneficiary, total_amount);
-            emit Withdraw(beneficiary, total_amount);
-        }
-        else{
-            require(address(this).balance > 0, "Empty");
-            (bool succeed, bytes memory data) = payable(beneficiary).call{value: address(this).balance}("");
-            require(succeed, "Failed to withdraw Ether");
-
-        }
-    } 
     function getBalance() public view returns (uint256) {
         return address(this).balance;
     }
@@ -400,14 +427,14 @@ contract GMPBundleV2 is Initializable, ERC721Upgradeable, ERC721EnumerableUpgrad
 
     function openBundle(uint256 tokenId) public {
         require(msg.sender == ownerOf(tokenId), "Not owner");
-        require(block.timestamp > lockTime, "Locked");
-        _burn(tokenId);
-    }
-    
-    function openBundles(uint256[] memory tokenIds) public {
-        for (uint256 index = 0; index < tokenIds.length; index++) {
-            openBundle(tokenIds[index]);
+        Attribute memory attr = attributes[tokenId];
+        for (uint256 index = 0; index < attr.landSpotSize; index++) {
+            ILandNFT(landAddressV2).openBundle(msg.sender, ILandNFT.LandType.GoldMiningPit);    
         }
+        for (uint256 index = 0; index < attr.moleQuantity; index++) {
+            IMoleNFT(moleAddressV2).openBundle(msg.sender);
+        }
+        _burn(tokenId);
     }
     
     function _burn(uint256 tokenId)
