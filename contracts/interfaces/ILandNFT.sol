@@ -5,4 +5,6 @@ interface ILandNFT {
   enum LandType{GoldMiningPit, GoldKingdomPit, ForgingPit}
   function openBundle(address owner, LandType landType) external;
   function mint(address buyer, uint256 quantity, LandType landType, uint256 randomness) external;
+  function getRarity(uint256 tokenId) external returns(uint256);
+  
 }

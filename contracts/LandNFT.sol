@@ -129,7 +129,7 @@ contract LandNFT is Initializable, ERC721Upgradeable, ERC721EnumerableUpgradeabl
     mapping(uint256 => Land) public lands;
     mapping(uint256 => Resource) public resourceOfLand;
     mapping(uint256 => string) private _tokenURIs;
-
+    
     event BuyLand(uint256 tokenId, LandType landType, uint256 totalAmount);
     event OpenBundle(uint256 tokenId, LandType landType);
     address public bundleAddress;
@@ -150,7 +150,9 @@ contract LandNFT is Initializable, ERC721Upgradeable, ERC721EnumerableUpgradeabl
     function getLand(uint256 tokenId) external view returns(Land memory) {
         return lands[tokenId];
     }
-
+    function getRarity(uint256 tokenId) external view returns(uint256) {
+        return uint256(lands[tokenId].rarity);
+    }
     function initialize(string memory _name, string memory _symbol, IERC20 token, bool _onlyWhitelisted) initializer public {
         __ERC721_init(_name, _symbol);
         __ERC721Enumerable_init();
@@ -240,7 +242,17 @@ contract LandNFT is Initializable, ERC721Upgradeable, ERC721EnumerableUpgradeabl
 
         emit OpenBundle(tokenId, landType);
     }
-    
+    function setLandAttr(
+        uint256 _tokenId, 
+        address _owner, 
+        bool _isGenesis, 
+        LandType _landType, 
+        uint256 _minted_at, 
+        Rarity _rarity, 
+        uint256 _asset_id, 
+        uint256 _randomResult) external onlyOperatorOrOwner {
+        lands[_tokenId] = Land(_tokenId, _owner, _isGenesis, _landType, _minted_at, _rarity, State.Hatched, _asset_id, _randomResult);
+    }
     function uint2str(uint _i) internal pure returns (string memory _uintAsString) {
         if (_i == 0) {
             return "0";
@@ -273,7 +285,7 @@ contract LandNFT is Initializable, ERC721Upgradeable, ERC721EnumerableUpgradeabl
     function setbundleAddress(address token) public onlyOwner{
       bundleAddress = token;
     }
-    
+
     function _isContract(address addr) internal view returns (bool) {
         uint256 size;
         assembly {

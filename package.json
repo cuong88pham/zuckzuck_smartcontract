@@ -13,11 +13,10 @@
   },
   "dependencies": {
     "@chainlink/contracts": "^0.4.0",
-    "@hapi/hapi": "^20.1.5",
-    "@nomiclabs/hardhat-etherscan": "^2.1.4",
     "@openzeppelin/contracts": "^4.4.2",
+    "@nomiclabs/hardhat-ethers": "^2.0.6",
     "@openzeppelin/contracts-upgradeable": "^4.4.2",
-    "@openzeppelin/hardhat-upgrades": "^1.14.0",
+    "@openzeppelin/hardhat-upgrades": "^1.18.1",
     "dotenv": "^10.0.0"
   }
 }
